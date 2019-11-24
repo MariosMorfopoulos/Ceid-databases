@@ -1,0 +1,330 @@
+﻿select user.name,user.surname,etaireia.name,job.id,job.salary,count(applies.cand_usrname) from job 
+inner join user      on user.username=job.recruiter
+inner join recruiter on job.recruiter=recruiter.username 
+inner join etaireia  on etaireia.AFM=recruiter.firm
+inner join applies   on applies.job_id=job.id where salary>1900
+group by user.name,user.surname,job.id,job.salary,etaireia.name;
+
+//2ος ΤΡΟΠΟΣ
+select user.name,user.surname,etaireia.name,job.id,job.salary,count(applies.cand_usrname) from job,user,recruiter,etaireia,applies
+ where user.username=job.recruiter
+ and  job.recruiter=recruiter.username 
+ and  etaireia.AFM=recruiter.firm
+ and  applies.job_id=job.id and salary>1900
+group by user.name,user.surname,job.id,job.salary,etaireia.name;
+
+
+select candidate.username,candidate.certificates,count(has_degree.degr_title),avg(has_degree.grade) from candidate
+inner join has_degree on has_degree.cand_usrname=candidate.username
+group by candidate.username,candidate.certificates having count(has_degree.degr_title)>1;
+
+//2ος ΤΡΟΠΟΣ
+select candidate.username,candidate.certificates,count(has_degree.degr_title),avg(has_degree.grade) from candidate,has_degree
+where has_degree.cand_usrname=candidate.username
+group by candidate.username,candidate.certificates having count(has_degree.degr_title)>1;
+
+
+select candidate.username,count(applies.cand_usrname),avg(job.salary) from candidate
+inner join applies on applies.cand_usrname=candidate.username
+inner join job     on job.id=applies.job_id
+where job.salary>1800 group by candidate.username;
+
+//2ος ΤΡΟΠΟΣ
+select candidate.username,count(applies.cand_usrname),avg(job.salary) from candidate,applies,job
+where applies.cand_usrname=candidate.username
+and  job.id=applies.job_id
+and job.salary>1800 group by candidate.username;
+
+select etaireia.name,job.position,group_concat(requires.antikeim_title) from etaireia,recruiter,job,requires
+where etaireia.AFM=recruiter.firm
+and   job.recruiter=recruiter.username
+and   requires.job_id=job.id
+and   etaireia.city like 'Patra' and requires.antikeim_title like '%Program%' group by etaireia.name,job.position;
+
+//2ος ΤΡΟΠΟΣ
+select etaireia.name,job.position,group_concat(requires.antikeim_title) from etaireia 
+inner join recruiter on etaireia.AFM=recruiter.firm
+inner join job       on job.recruiter=recruiter.username
+inner join requires on requires.job_id=job.id
+where etaireia.city like 'Patra' and requires.antikeim_title like '%Program%' group by etaireia.name,job.position;
+
+
+SELECT recruiter.username,COUNT(interviews.id),
+COUNT(DISTINCT job.id) as Jobs, AVG(job.salary) 
+FROM recruiter
+INNER JOIN job ON recruiter.username = job.recruiter
+INNER JOIN interviews ON recruiter.username = interviews.recruiter_username 
+GROUP BY recruiter.username
+HAVING COUNT(job.id) > 2 
+ORDER BY AVG(job.salary) DESC;
+
+//1ο Procedure candidate
+
+DROP PROCEDURE IF EXISTS CANDIDATES_FOR;
+DELIMITER $
+CREATE PROCEDURE CANDIDATES_FOR (IN job_id int(5))
+BEGIN
+	DECLARE uname VARCHAR(12);
+	DECLARE candidate_interviewed  VARCHAR(12);
+	DECLARE personality SET('1','2','3','4','5');
+	DECLARE education  SET('1','2','3','4','5');
+	DECLARE experience SET('1','2','3','4','5');
+	DECLARE reason VARCHAR(100) DEFAULT "";
+	DECLARE bad_candidate INT DEFAULT FALSE;
+	DECLARE done INT DEFAULT FALSE;
+        DECLARE score FLOAT (6,1);  
+              DECLARE edut FLOAT (6,1);  
+               DECLARE perst FLOAT (6,1); 
+               DECLARE expt FLOAT (6,1);   
+     
+	DECLARE cursor_candidate CURSOR FOR 
+	SELECT cand_usrname FROM applies 
+               INNER JOIN  job  ON  applies.job_id = job. id; 
+	DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+                 
+    OPEN cursor_candidate;
+
+    cand_loop: LOOP
+    FETCH cursor_candidate INTO uname;
+
+    IF done THEN
+    LEAVE cand_loop;
+    END IF;
+    
+    
+    SET bad_candidate = 0;
+    SET reason = "";
+    
+    SELECT cand_usrname INTO candidate_interviewed  FROM interviews WHERE cand_usrname = uname
+		LIMIT 1;IF candidate_interviewed IS NULL THEN
+		SET reason = CONCAT(reason, "Not interviewed yet");
+		SET bad_candidate = 1;
+		END IF;
+
+    SELECT AVG(personality), SUM(education), SUM(experience) INTO personality, education, experience
+    FROM interviews 
+    INNER JOIN  job  ON interviews.target_job = job.id  
+    WHERE cand_usrname = uname;
+  
+
+    IF personality = 0 THEN
+    SET reason = CONCAT(reason, "Failed the interview");
+    SET bad_candidate = 1;
+    END IF;
+
+    IF education = 0 THEN
+    SET reason = CONCAT(reason, "Inadequate education");
+    SET bad_candidate = 1;
+    END IF;
+
+    IF experience = 0 THEN
+    SET reason = CONCAT(reason, "No prior experience");
+    SET bad_candidate = 1;
+    END IF;
+
+    IF bad_candidate = 1 THEN
+    SELECT uname, reason;
+    ELSE
+    SELECT uname, AVG(interviews.personality) as perst  , AVG(interviews.education) as edut , AVG(interviews.experience) as expt , AVG(perst+ edut+ expt) as score
+    FROM applies, interviews,job
+    WHERE    applies.job_id = job. id                                                                           AND 
+                     applies.job_id = interviews.target_job                                                       AND 
+                     applies.cand_usrname = interviews.cand_usrname               AND 
+                     interviews.target_job  = job. id
+    GROUP BY uname
+    ORDER BY total
+DESC;
+    END IF;
+
+    END LOOP;
+    CLOSE cursor_candidate;
+
+END $
+DELIMITER ;
+
+//TRIGGERS FOR CANDIDATE
+DELIMITER $
+CREATE TRIGGER candidate_insert  AFTER INSERT ON candidate
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"insert",NOW(),'candidate',1);
+END $
+DELIMITER ;
+
+mysql> insert into candidate values('zazahir23','jhjk','exei polles','ghjk');
+ERROR 1062 (23000): Duplicate entry 'zazahir23' for key 'PRIMARY'
+
+DELIMITER $
+CREATE TRIGGER candidate_update  AFTER UPDATE ON candidate
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"UPDATE",NOW(),'candidate',1);
+END $
+DELIMITER ;
+
+mysql> update candidate set username='zazahir23' where username='zazahir23';
+Query OK, 0 rows affected (0.00 sec)
+Rows matched: 1  Changed: 0  Warnings: 0
+mysql> update candidate set username='zazahir25' where username='zazahir23';
+ERROR 1452 (23000): failed
+mysql> update candidate set sistatikes='kkkk' where username='zazahir23';
+Query OK, 1 row affected (0.00 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+DELIMITER $
+CREATE TRIGGER candidate_delete  AFTER DELETE ON candidate
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"delete",NOW(),'candidate',1);
+END $
+DELIMITER ;
+
+mysql> delete from candidate where username='abrownn';
+Query OK, 0 rows affected (0.00 sec)
+mysql> delete from candidate where username='abrown';
+Query OK, 1 row affected (0.03 sec)
+
+//TRIGGERS FOR RECRUITER
+DELIMITER $
+CREATE TRIGGER recruiter_insert  AFTER INSERT ON recruiter
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"insert",NOW(),'recruiter',1);
+END $
+DELIMITER ;
+
+mysql> insert into recruiter values('bettyg',5,'456776');
+ERROR 1062 (23000): Duplicate entry 'bettyg' for key 'PRIMARY'
+
+
+DELIMITER $
+CREATE TRIGGER recruiter_update  AFTER UPDATE ON recruiter
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"delete",NOW(),'recruiter',1);
+END $
+DELIMITER ;
+
+mysql> update recruiter set exp_years=27 where username='bettyg';
+Query OK, 1 row affected (0.01 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+mysql> update recruiter set exp_years=27 where username='bettygg';
+Query OK, 0 rows affected (0.00 sec)
+Rows matched: 0  Changed: 0  Warnings: 0
+
+DELIMITER $
+CREATE TRIGGER recruiter_delete  AFTER DELETE ON recruiter
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"delete",NOW(),'recruiter',1);
+END $
+DELIMITER ;
+
+mysql> delete from recruiter where username='my19001';
+Query OK, 0 rows affected (0.01 sec)
+
+//TRIGGERS FOR USER
+DELIMITER $
+CREATE TRIGGER user_insert  AFTER INSERT ON user
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"insert",NOW(),'user',1);
+END $
+DELIMITER ;
+
+
+
+
+DELIMITER $
+CREATE TRIGGER user_update AFTER UPDATE ON user
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"update",NOW(),'user',1);
+END $
+DELIMITER ;
+
+DELIMITER $
+CREATE TRIGGER user_delete AFTER DELETE ON user
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,username,"delete",NOW(),'user',1);
+END $
+DELIMITER ;
+
+//TRIGGERS FOR JOB
+DELIMITER $
+CREATE TRIGGER job_insert AFTER INSERT ON job
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,recruiter,"insert",NOW(),'job',1);
+END $
+DELIMITER ;
+
+DELIMITER $
+CREATE TRIGGER job_update AFTER UPDATE ON job
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,recruiter,"update",NOW(),'job',1);
+END $
+DELIMITER ;
+
+DELIMITER $
+CREATE TRIGGER job_delete AFTER DELETE ON job
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,'recruiter',"delete",NOW(),'job',1);
+END $
+DELIMITER ;
+
+//TRIGGERS FOR ETAIREIA
+DELIMITER $
+CREATE TRIGGER etaireia_insert AFTER INSERT ON etaireia
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,user(),"insert",NOW(),'etaireia',1);
+END $
+DELIMITER ;
+
+DELIMITER $
+CREATE TRIGGER etaireia_upd  before UPDATE ON etaireia
+FOR EACH ROW
+BEGIN
+SET NEW.AFM=OLD.AFM;
+SET NEW.DOY=OLD.DOY;
+SET NEW.name=OLD.name; 
+INSERT INTO action VALUES(NULL,user(),"update",NOW(),'etaireia',1);
+END $
+DELIMITER ;
+
+mysql> update job set announce_date='2019-01-31' where id=1;
+Query OK, 1 row affected (0.01 sec)
+Rows matched: 1  Changed: 1  Warnings: 0
+
+DELIMITER $
+CREATE TRIGGER etaireia_delete AFTER DELETE ON etaireia
+FOR EACH ROW
+BEGIN 
+INSERT INTO action VALUES(NULL,user(),"delete",NOW(),'etaireia',1);
+END $
+DELIMITER ;
+
+
+//3ο Ερώτημα 
+
+DELIMITER $
+CREATE TRIGGER prevent_delete AFTER DELETE ON applies
+FOR EACH ROW
+BEGIN
+IF (select  submission_date from job where job.id=requires.job_id) < NOW() THEN 
+INSERT INTO action VALUES(NULL,cand_usrname,"update",NOW(),'candidate',0);
+SIGNAL SQLSTATE VALUE '45000'
+ SET MESSAGE_TEXT = '-20001,Application failed to delete,submission date has passed';
+END IF;
+END $
+DELIMITER ;
+
+mysql> delete from applies where job_id=234;
+Query OK, 0 rows affected (0.00 sec)
+
+
